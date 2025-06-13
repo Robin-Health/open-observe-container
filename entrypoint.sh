@@ -140,6 +140,7 @@ export ZO_META_TRANSACTION_RETRIES
 # Parse and set PostgreSQL configuration if metastore is postgres
 if [ "$ZO_META_STORE" == "postgres" ]; then
     # Get PostgreSQL credentials (either from Secrets Manager or direct JSON)
+    echo "Fetching PostgreSQL credentials..."
     POSTGRES_SECRET_JSON=$(get_json_value "$ZO_POSTGRES_CONFIG")
     if [ -z "$POSTGRES_SECRET_JSON" ]; then
         echo "Error: Failed to retrieve PostgreSQL credentials."
@@ -152,6 +153,8 @@ if [ "$ZO_META_STORE" == "postgres" ]; then
     PG_PASSWORD=$(echo "$POSTGRES_SECRET_JSON" | jq -r '.password')
     PG_DATABASE=$(echo "$POSTGRES_SECRET_JSON" | jq -r '.database // "openobserve"')
     
+    echo "DEBUG: PG_HOST=$PG_HOST, PG_PORT=$PG_PORT, PG_USER=$PG_USER, PG_DATABASE=$PG_DATABASE"
+
     if [ -z "$PG_HOST" ] || [ -z "$PG_PORT" ] || [ -z "$PG_USER" ] || [ -z "$PG_PASSWORD" ]; then
         echo "Error: Invalid PostgreSQL configuration. Please check ZO_POSTGRES_CONFIG."
         exit 1
