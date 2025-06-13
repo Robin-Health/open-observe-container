@@ -1,0 +1,83 @@
+name: Deploy to Amazon App Runner
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Manual override for deployment environment (dev, int, demo, prod)'
+        required: false
+        type: choice
+        options:
+          - dev
+          - int
+          - demo
+          - prod
+
+env:
+  AWS_REGION: us-east-1
+  # DEPLOY_ENV: ${{ github.event.inputs.environment || (github.ref == 'refs/heads/main' && 'prod') || (github.ref == 'refs/heads/develop' && 'dev') }}
+  DEPLOY_ENV: ${{ github.event.inputs.environment || 'dev' }}
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Output Inputs
+        run: echo "${{ toJSON(github.event.inputs) }}"
+        
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@0e613a0980cbf65ed5b322eb7a1e075d28913a83
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set env vars based on deployment env
+        run: |
+          echo "ECR_REPOSITORY=${{ env.DEPLOY_ENV }}-openobserve" >> $GITHUB_ENV
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@62f4f872db3836360b72999f4b87f1ff13310f3a
+
+      - name: Get last commit message
+        run: echo "COMMIT_MSG=$(git log -1 --pretty=%B)" >> $GITHUB_ENV
+  
+      - name: Prepare build variables
+        run: |
+          echo "BUILD_TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> $GITHUB_ENV
+          echo "GIT_HASH=$(git rev-parse HEAD)" >> $GITHUB_ENV
+
+      - name: Debug print build varaibles
+        run: |
+          echo "${{ env.COMMIT_MSG }}"
+          echo "${{ env.BUILD_TIMESTAMP }}"
+          echo "${{ env.GIT_HASH }}"
+
+      - name: Build, tag, and push image to Amazon ECR
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          # Build a docker container and
+          # push it to ECR so that it can
+          # be deployed to ECS.
+          docker build \
+                 --label commit_message="${{ env.COMMIT_MSG }}" \
+                 --build-arg GIT_HASH=${{ env.GIT_HASH }} \
+                 --build-arg BUILD_TIMESTAMP=${{ env.BUILD_TIMESTAMP }} \
+                 -t $ECR_REGISTRY/$ECR_REPOSITORY:${{ env.IMAGE_TAG }} \
+                 -t $ECR_REGISTRY/$ECR_REPOSITORY:latest \
+                 .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY --all-tags
+          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
