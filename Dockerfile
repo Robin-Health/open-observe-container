@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y \
     curl \
     nginx \ 
     jq \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
 
 # Set the OpenObserve version
