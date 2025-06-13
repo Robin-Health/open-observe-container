@@ -42,7 +42,7 @@ get_json_value() {
     local input="$1"
     
     if is_secrets_manager_arn "$input"; then
-        echo "Fetching secret from AWS Secrets Manager..."
+        echo "Fetching secret from AWS Secrets Manager..." >&2
         local secret_value=$(get_secret_value "$input")
         if [ $? -eq 0 ] && [ -n "$secret_value" ]; then
             echo "$secret_value"
