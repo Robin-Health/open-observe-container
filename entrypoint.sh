@@ -17,12 +17,24 @@ get_secret_value() {
     local secret_arn="$1"
     local region="${AWS_REGION:-us-east-1}"
     
+    echo "DEBUG: Attempting to fetch secret: $secret_arn from region: $region" >&2
+    
     # Use AWS CLI to get the secret value
-    aws secretsmanager get-secret-value \
+    local result=$(aws secretsmanager get-secret-value \
         --secret-id "$secret_arn" \
         --region "$region" \
         --query 'SecretString' \
-        --output text 2>/dev/null
+        --output text 2>&1)
+    
+    local exit_code=$?
+    
+    if [ $exit_code -ne 0 ]; then
+        echo "ERROR: AWS CLI failed with exit code $exit_code" >&2
+        echo "ERROR: AWS CLI output: $result" >&2
+        return 1
+    fi
+    
+    echo "$result"
 }
 
 # Function to get JSON value (either from Secrets Manager or direct value)
@@ -31,7 +43,13 @@ get_json_value() {
     
     if is_secrets_manager_arn "$input"; then
         echo "Fetching secret from AWS Secrets Manager..."
-        get_secret_value "$input"
+        local secret_value=$(get_secret_value "$input")
+        if [ $? -eq 0 ] && [ -n "$secret_value" ]; then
+            echo "$secret_value"
+        else
+            echo "Error: Failed to retrieve secret from Secrets Manager" >&2
+            return 1
+        fi
     else
         echo "$input"
     fi
@@ -53,18 +71,32 @@ for var in "${required_vars[@]}"; do
 done
 
 # Get admin credentials (either from Secrets Manager or direct JSON)
+echo "DEBUG: ZO_AUTH_JSON value: $ZO_AUTH_JSON"
 ADMIN_SECRET_JSON=$(get_json_value "$ZO_AUTH_JSON")
+echo "DEBUG: Retrieved admin secret: $ADMIN_SECRET_JSON"
+
 if [ -z "$ADMIN_SECRET_JSON" ]; then
     echo "Error: Failed to retrieve admin credentials."
+    exit 1
+fi
+
+# Validate JSON before parsing
+if ! echo "$ADMIN_SECRET_JSON" | jq empty 2>/dev/null; then
+    echo "Error: Invalid JSON format in admin credentials:"
+    echo "$ADMIN_SECRET_JSON"
     exit 1
 fi
 
 # Parse JSON and extract user_email and password
 ZO_ROOT_USER_EMAIL=$(echo "$ADMIN_SECRET_JSON" | jq -r '.user_email')
 ZO_ROOT_USER_PASSWORD=$(echo "$ADMIN_SECRET_JSON" | jq -r '.password')
+echo "DEBUG: Extracted email: $ZO_ROOT_USER_EMAIL"
+echo "DEBUG: Extracted password: [REDACTED]"
+
 if [ -z "$ZO_ROOT_USER_EMAIL" ] || [ "$ZO_ROOT_USER_EMAIL" == "null" ] || 
    [ -z "$ZO_ROOT_USER_PASSWORD" ] || [ "$ZO_ROOT_USER_PASSWORD" == "null" ]; then
     echo "Error: Failed to extract user_email or password from admin credentials."
+    echo "Admin secret JSON: $ADMIN_SECRET_JSON"
     exit 1
 fi
 
